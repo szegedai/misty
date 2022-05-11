@@ -1,0 +1,1 @@
+See https://github.com/ficstamas/huclip-the-text for more details!
