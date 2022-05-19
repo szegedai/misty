@@ -6,10 +6,31 @@ import sys
 import signal
 
 class SpeechToTextAPI():
+    ws = None
     uri = ""
+    sample_rate = 0 # the audio sample rate (e.g. 44100 for 44,1kHz)
+    frame_size = 0 # the size of one audio frame (e.g. 2 for 16 bit encoding)
+    
+    frames_sent = 0
+    
+    is_sending = False
     
     def __init__(self, stt_uri):
         self.uri = stt_uri
+    
+    async def message_listener(self):
+        i = 0
+        while True:
+            # Yield control and give other async coroutines a chance to run
+            await asyncio.sleep(0)
+            #print("message_listener")
+            #i+= 1
+            #if i % 100 == 0:
+                #print("message_listener")
+            if self.ws is not None:
+                print("awaiting message")
+                message = await self.ws.recv()
+                print("msg: ", message)
     
     async def ws_check_connection(self):
         async for ws in websockets.connect(self.uri):
@@ -19,6 +40,63 @@ class SpeechToTextAPI():
                 return True
             except:
                 return False
+    
+    async def ws_stream_init(self, sample_rate, frame_size):
+        try:
+            self.ws = await websockets.connect(self.uri)
+            
+            print("Binding model")
+            await self.ws.send("control|bind-request;general_hu")
+            #resp = await self.ws.recv()
+            #print(resp)
+            #print("Starting streaming")
+            print("speechtotext.py sending control|start to the websocket server")
+            await self.ws.send("control|start;" + str(self.sample_rate) + ";-1;0")
+            #resp = await self.ws.recv()
+            #print(resp)
+            self.is_sending = True
+            
+        except Exception as e:
+            print(e)
+            print("Unable to connect to the websocket server!")
+            
+    async def ws_stream_send(self, audio_frame):
+        #return "stt_api ws_stream_send " +  str(audio_frame)
+        if self.ws is not None:
+            if len(audio_frame) > 1:
+                # TODEBUG: Trying to stream bytearrays is not working!
+                # The example JavaScript code sends audio data as 16 bit int arrays
+                
+                test_data = bytearray(b"\x00\x00\x00\x00")
+                #await self.ws.send([int.from_bytes(test_data, sys.byteorder)])
+                #await self.ws.send(audio_frame)
+                await self.ws.send(test_data)
+                #resp = await self.ws.recv()
+                #return resp
+                if self.is_sending is True:
+                    self.frames_sent+=1
+                    if self.frames_sent % 10000 == 0:
+                        print("frames sent: ", self.frames_sent)
+                    
+                    if self.frames_sent == 330000:
+                        print("sending control|stop to the websocket server")
+                        await self.ws.send("control|stop")
+                        self.is_sending = False
+                
+                #return type(audio_frame)
+                #test = await self.ws.send("control|ping")
+                
+        # Process messages received on the connection.
+        #async for message in self.ws:
+            #if message.startswith("result|1;"):
+                #return message
+            
+    async def ws_stream_close(self):
+        print("Closing the websocket.")
+        await self.ws.send("control|stop")
+        await self.ws.send("control|disconnect")
+        await self.ws.close()
+        print("websocket closed")
             
     # params: 
     #   websocket:      WebSocket object
