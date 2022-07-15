@@ -1,1 +1,0 @@
-huclip-the-text @ git+https://github.com/ficstamas/huclip-the-text.git@v1.0.0
