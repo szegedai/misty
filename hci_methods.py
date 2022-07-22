@@ -3,10 +3,11 @@ import tts
 import time
 import base64
 import asyncio
-import stt_bme
+import SpeechToText
 # from RPS.detection import _grab_mid
 from huclip_the_text.model.clip import KeywordCLIP
-stt_api = stt_bme.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
+from PIL import Image
+stt = SpeechToText.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
 model = KeywordCLIP()
 
 again = 'Ha szeretnél új kérdést feltenni akkor simogasd meg újra a fejem. Ha nem szeretnél tovább játszani érj az államhoz.'
@@ -29,7 +30,7 @@ def recognizer(misty, message):
     image = cv2.imread('file.jpg')
 
     misty.ChangeLED(255, 255, 0)
-    best_answer, probability, all_answer = model.evaluate(image.fromarray(image), message)
+    best_answer, probability, all_answer = model.evaluate(Image.fromarray(image), message)
     # TODO speech_to_text(url, '')
 
     misty.ChangeLED(0, 255, 0)

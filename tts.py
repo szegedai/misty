@@ -5,7 +5,7 @@ from base64 import b64encode, b64decode
 
 class TextToSpeechAPI:
     uri = ""
-    speaker = "NG"  # NG male voice, MK female voice
+    speaker = "MK"  # NG male voice, MK female voice
 
     def __init__(self, tts_uri):
         self.uri = tts_uri

@@ -18,11 +18,15 @@ import time
 import random
 import base64
 import asyncio
-import stt_bme
 import numpy as np
 import dateutil.parser
 import rps
 import recognizer
+
+import Recorder
+import SpeechToText
+from main import init
+from main import datastream
 
 from statistics import mean
 from mistyPy.Robot import Robot
@@ -30,6 +34,7 @@ from mistyPy.Events import Events
 from datetime import datetime, timezone
 from mistyPy.EventFilters import EventFilters
 
+LOOP = None
 searching_for_face = None
 head_yaw = None
 head_pitch = None
@@ -57,8 +62,9 @@ head_yaw_for_turning = None
 _1b = None
 _2b = None
 vector = None
+RECORDER = None
 degree_list = []
-stt_api = stt_bme.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
+stt = SpeechToText.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
 
 
 # initializing variables, registering events and starting services required for the idle skill
@@ -96,9 +102,9 @@ def init_variables_and_events():
     looked_at = datetime.now(timezone.utc)
     misty.UnregisterAllEvents()
     # starting services
-    misty.EnableCameraService()
+    # misty.EnableCameraService()
     # misty.StopFaceRecognition()
-    misty.StartFaceRecognition()
+    # misty.StartFaceRecognition()
     # registering evnets
     # event needed for face recognition
     face_rec_event_status = misty.RegisterEvent("face_rec", Events.FaceRecognition, callback_function=face_rec_callback,
@@ -119,6 +125,7 @@ def init_variables_and_events():
                         keep_alive=True)
     misty.RegisterEvent("captouch", Events.TouchSensor, callback_function=captouch_callback, debounce=100,
                         keep_alive=True)
+
 
 # callback for the captouch event
 # we use this to restart the idle skill if something goes wrong
@@ -153,6 +160,28 @@ def start_external_skill(skill=""):
     start_external = True
 
 
+def recording(recorder):
+    # global idle_skill
+    # idle_skill=False
+
+    data_stream = datastream(recorder, stt)
+    try:
+        misty.ChangeLED(200, 0,0)
+        print("try")
+        # loop_a = asyncio.new_event_loop()
+        # asyncio.set_event_loop(loop_a)
+        print(LOOP)
+        res = LOOP.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
+        print("KESZ")
+        print(res[1])
+        misty.ChangeLED(0,200,0)
+
+        respond(str.lower(res[1]))
+    except Exception as e:
+        print(e)
+        recorder.close_recording_resources()
+
+
 # this function starts the idle skill
 def start_idle_skill(misty_robot, calibration=False):
     global searching_for_face, misty, turn_in_progress,  face_rec_event_status
@@ -163,6 +192,7 @@ def start_idle_skill(misty_robot, calibration=False):
     if calibration:
         calibrate()
     # this is the main loop of the skill
+    misty.StartFaceRecognition()
     while idle_skill:
         time.sleep(0.1)
         if misty is not None:
@@ -177,9 +207,15 @@ def start_idle_skill(misty_robot, calibration=False):
                         datetime.now(timezone.utc) - date_time_of_last_face_detection).total_seconds()
             # if the last face detection was more than 4 seconds ago, and turning is not in progress
             # then we unregister events for conversation and register events for turning
+            if not searching_for_face:
+                misty.StopFaceRecognition()
+                recording(RECORDER)
+
             if (seconds_since_last_detection >= 4 or searching_for_face) \
                     and not turn_in_progress \
-                    and not waiting_for_response:
+                    and not waiting_for_response\
+                    and not start_external:
+
                 # if the key_phrase_recognized event is still registered,
                 # we stop the KeyPhraseRecognition and unregister the event
                 # this is needed, because we need the key_phrase_turn event,
@@ -191,8 +227,7 @@ def start_idle_skill(misty_robot, calibration=False):
                     print("Face lost...")
                     print("KeyPhraseRecognition stopped (for conversation)")
                 # we also unregister voic_cap if it's still registered
-                if "voice_cap" in misty.active_event_registrations:
-                    misty.UnregisterEvent("voice_cap")
+
                 # if key_phrase_turn is not registered, we register it
                 # this event is needed for turning towards sound
                 if not "key_phrase_turn" in misty.active_event_registrations:
@@ -223,7 +258,7 @@ def calibrate():
     yaw_right = head_yaw
     print(f"yaw_right recorded: {yaw_right}")
 
-    misty.MoveHead(0, 0, 90, None, 2);
+    misty.MoveHead(0, 0, 90, None, 2)
     time.sleep(4)
     yaw_left = head_yaw
     print(f"yaw_left recorded: {yaw_left}")
@@ -386,18 +421,6 @@ def look_at(heading, robot_yaw_at_start, head_yaw_at_start):
     print("look_at DONE")
 
 
-# # we call this function, when misty detects a face
-# this function registers the voice_cap and key_phrase_recognized events and starts KeyPhraseRecognition
-# misty starts listening to "Hey, Misty!" and after the beep sound she is listening to speech, and records it
-def start_listening():
-    misty.RegisterEvent("voice_cap", Events.VoiceRecord, callback_function=voice_rec_callback, debounce=10,
-                        keep_alive=False)
-    misty.RegisterEvent("key_phrase_recognized", Events.KeyPhraseRecognized, callback_function=key_phrase_callback,
-                        debounce=10, keep_alive=False)
-    misty.StartKeyPhraseRecognition()
-    print("KeyPhraseRecognition started (for conversation)")
-
-
 # callback for the set_head_yaw event
 # stores head position data needed for turning and following face
 def set_head_yaw_callback(data):
@@ -418,11 +441,6 @@ def set_head_pitch_callback(data):
     # print(f"head_pitch set to: {head_pitch}")
 
 
-def key_phrase_callback(data):
-    print(f"Misty heard you, trying to wake her up. Confidence: {data['message']['confidence']}%")
-    # misty.Speak("Hello")
-
-
 # this function is supposed to make Misty respond appropriately to the user
 # right now intent recognition is not implemented
 # if the speech_to_text_result contains "minta" or "mint a" the sample skill starts
@@ -440,64 +458,15 @@ def respond(speech_to_text_result=""):
         start_external_skill("sample")
     elif "papír" in speech_to_text_result:
         start_external_skill("ph_rps")
-    elif "érzelem" in speech_to_text_result or "érzel" in speech_to_text_result:
-        start_external_skill("ph_emotion")
     elif "felismerő" in speech_to_text_result or "ismer" in speech_to_text_result:
         start_external_skill("ph_recognizer")
     else:
         print("Nem értette")
         tts.synthesize_text_to_robot(misty, f"Azt hallottam, hogy: {speech_to_text_result}", "response.wav")
         # tts.synthesize_text_to_robot(misty, "Nem értettem, kérlek mondd máshogy!", "response.wav")
+        recording(RECORDER)
 
     waiting_for_response = False
-
-
-# callback for the voice_cap event
-# this triggers after we woke misty up with "Hey, Misty!" and started (and finished) speaking to her
-# misty captures speech and saves it to the "capture_HeyMisty.wav" file on the Robot
-# then we can access this file, send it to STT and call the respond() function
-def voice_rec_callback(data):
-    global waiting_for_response
-    speech_to_text_result = ""
-    print("voice_rec_callback START")
-    if data["message"]["success"]:
-        # accessing the wav file
-        encoded_string = misty.GetAudioFile("capture_HeyMisty.wav", True).json()["result"]["base64"]
-        misty.DeleteAudio("capture_HeyMisty.wav")
-        # copying the file into "out.wav"
-        wav_file = open("out.wav", "wb")
-        wav_file.write(base64.b64decode(encoded_string))
-
-        # we send the wav file to the BME stt
-        try:
-            if asyncio.run(stt_api.ws_check_connection()):
-                # while we wait for the result,
-                # we change the led to green to indicate that stuff is happening in the background
-                waiting_for_response = True
-                misty.ChangeLED(0, 255, 0)
-                misty.DisplayImage("e_Thinking4.jpg")
-                res = asyncio.run(stt_api.ws_wav_recognition("out.wav", 4096))
-                print("Result: ", res.split(";")[1])
-                speech_to_text_result = res.split(";")[1]
-            else:
-                print("Unable to establish connection to the ASR server!")
-        except Exception as e:
-            print("ERROR")
-            print(e)
-
-        respond(str.lower(speech_to_text_result))
-
-    else:
-        print("Unsuccessful voice recording")
-    print("unregistering...")
-    # after responding, unregister events needed for the conversation
-    if "voice_cap" in misty.active_event_registrations:
-        misty.UnregisterEvent("voice_cap")
-    if "key_phrase_recognized" in misty.active_event_registrations:
-        misty.UnregisterEvent("key_phrase_recognized")
-    misty.StopKeyPhraseRecognition()
-    time.sleep(1)
-    print("voice_rec_callback DONE")
 
 
 # callback for the face_rec event
@@ -507,6 +476,7 @@ def voice_rec_callback(data):
 # we also try to follow the recognised face
 def face_rec_callback(data):
     global searching_for_face, misty, turn_in_progress, first_contact
+
 
     print("face found!")
     # print(data["message"]["label"])
@@ -537,15 +507,8 @@ def face_rec_callback(data):
         # misty.ChangeLED(0, 255, 0);
         misty.DisplayImage("e_Love.jpg")
         time.sleep(1)
-        start_listening()
 
-    # if registartion was unsuccessful for some reason (and the conversation events arent registered), we try again
-    if not "voice_cap" in misty.active_event_registrations \
-            and not "key_phrase_recognized" in misty.active_event_registrations \
-            and not turn_in_progress \
-            and not waiting_for_response:
-        print("first failed")
-        start_listening()
+        # recording(RECORDER)
 
     # storing head position data
     bearing = data["message"]["bearing"]
@@ -596,10 +559,20 @@ def stop_idle_skill():
     misty.StopRecordingAudio()
     # misty.DisableCameraService()
     misty.Halt()
+    time.sleep(3)
     print("IDLE_SKILL_STOPPED")
 
 
 if __name__ == "__main__":
+
+    LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(LOOP)
+    LOOP.run_until_complete(init(stt))
+
+    stream_params = Recorder.StreamParams()
+    RECORDER = Recorder.Recorder(stream_params)
+    RECORDER.create_recording_resources()
+
     try:
         if len(sys.argv) > 1:
             misty_ip_address = sys.argv[1]
@@ -621,12 +594,10 @@ if __name__ == "__main__":
             # if start_external is True, we check the skill_to_start variable's value and start a skill based on that
             if start_external:
 
-                if skill_to_start == "rps":
-                    skill_finished = rps.start_robot_connection(misty_ip_address)
-                elif skill_to_start == "ph_rps":
-                    skill_finished = rps.start_skill(misty, misty_ip_address)
+                if skill_to_start == "ph_rps":
+                    skill_finished = rps.start_skill(misty, recorder=RECORDER, loop=LOOP)
                 elif skill_to_start == "ph_recognizer":
-                    skill_finished = recognizer.start_skill(misty)
+                    skill_finished = recognizer.start_skill(misty, recorder=RECORDER)
 
                 else:
                     print("skill not found restarting idle_skill")

@@ -6,14 +6,18 @@
 import tts
 import time
 import base64
-import stt_bme
 import asyncio
+
+import Recorder
+import SpeechToText
+from main import init
+from main import datastream
 import hci_methods
 from mistyPy.Robot import Robot
 from mistyPy.Events import Events
 
 return_to_idle = False
-stt_api = stt_bme.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
+stt = SpeechToText.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
 misty = None
 message = ''
 thanks = 'Köszönöm a játékot'
@@ -35,59 +39,21 @@ def captouch_callback(data):
         # misty.DisplayImage("e_EcstacyStarryEyed.jpg", 1)
         # misty.PlayAudio("s_Awe2.wav", 50)
 
-    if 'Head' in sensor_pos:
-        pass
 
-
-def voice_rec_callback(data):
-    speech_to_text_result = ""
-    print("voice_rec_callback START")
-    if data["message"]["success"]:
-        # misty.StopKeyPhraseRecognition()
-
-        # misty.StopRecordingAudio()
-        # accessing the wav file
-        encoded_string = misty.GetAudioFile("capture_HeyMisty.wav", True).json()["result"]["base64"]
-        misty.DeleteAudio("capture_HeyMisty.wav")
-        # copying the file into "out.wav"
-        wav_file = open("out.wav", "wb")
-        wav_file.write(base64.b64decode(encoded_string))
-        # we send the wav file to the BME stt
-        try:
-            # while we wait for the result,
-            # we change the led to green to indicate that stuff is happening in the background
-
-            misty.ChangeLED(0, 255, 0)
-            misty.DisplayImage("e_Thinking4.jpg")
-
-            res = asyncio.run(stt_api.ws_wav_recognition("out.wav", 4096))
-            print("Result: ", res.split(";")[1])
-            speech_to_text_result = res.split(";")[1]
-
-        except Exception as e:
-            print("ERROR")
-            print(e)
-        print("waiting for response")
-        respond(speech_to_text_result)
-    else:
-        print("Unsuccessful voice recording")
-    # print("unregistering...")
-    # after responding, unregister events needed for the conversation
-    time.sleep(1)
-    print("voice_rec_callback DONE")
-
-
-def respond(speech_to_text_result):
+def respond(speech_to_text_result, recorder):
     global return_to_idle
-    if ("kilép" or "befejez" or "vége" or "abba") in speech_to_text_result:
+    print(speech_to_text_result)
+    if "kilép" or "befejez" or "vége" or "abba" in speech_to_text_result:
         tts.synthesize_text_to_robot(misty, "Köszönöm a játékot! Viszlát!", "mistynek.wav")
         exit_function()
         return_to_idle = True
-    elif ("ez" or "mi" or "vagy") in speech_to_text_result:
+    if "vagy" in speech_to_text_result:
         print("még egy játék!")
         hci_methods.recognizer(misty, speech_to_text_result)
+        recording(recorder)
     else:
         print("nem értettem, próbáld újra")
+        recording(recorder)
 
 
 def exit_function():
@@ -101,10 +67,27 @@ def exit_function():
     print("Exiting program.")
 
 
-def start_skill(misty_robot):
+def recording(recorder):
+    data_stream = datastream(recorder, stt)
+    try:
+        misty.ChangeLED(200, 0,0)
+
+        loop = asyncio.get_event_loop()
+        res = loop.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
+
+        misty.ChangeLED(0,200,0)
+        respond(str.lower(res[1]), recorder)
+
+    except KeyboardInterrupt as e:
+        print(e)
+        recorder.close_recording_resources()
+    finally:
+        recorder.close_recording_resources()
+
+
+def start_skill(misty_robot, recorder):
     global misty, return_to_idle
     misty = misty_robot
-
     try:
         #
         # tts.synthesize_text_to_robot(misty, "Elindult a felismerő játék", "response.wav")
@@ -114,12 +97,16 @@ def start_skill(misty_robot):
             misty.ChangeLED(255, 0, 255)
             misty.RegisterEvent("CapTouchSensor", Events.TouchSensor, callback_function=captouch_callback,
                                 debounce=2000, keep_alive=True)
-            misty.RegisterEvent("VoiceRec", Events.VoiceRecord, callback_function=voice_rec_callback, debounce=20,
-                                keep_alive=False)
-            misty.RegisterEvent("KeyPhraseRec", Events.KeyPhraseRecognized, debounce=20, keep_alive=False)
-            misty.StartKeyPhraseRecognition()
-            print("KeyPhraseRecognition started (for conversation)")
 
+            # loop = asyncio.new_event_loop()
+            # asyncio.set_event_loop(loop)
+            # loop.run_until_complete(init(stt))
+            #
+            # stream_params = Recorder.StreamParams()
+            # RECORDER = Recorder.Recorder(stream_params)
+            # RECORDER.create_recording_resources()
+
+            recording(recorder)
             # misty.UnregisterAllEvents()
         while True:
             time.sleep(1)
@@ -140,4 +127,12 @@ def start_skill(misty_robot):
 if __name__ == '__main__':
     misty_ip = "10.2.8.5"
     misty = Robot(misty_ip)
-    start_skill(misty)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(init(stt))
+
+    stream_params = Recorder.StreamParams()
+    recorder = Recorder.Recorder(stream_params)
+    recorder.create_recording_resources()
+    start_skill(misty, recorder)
