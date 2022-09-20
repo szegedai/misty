@@ -39,14 +39,17 @@ class SpeechToTextAPI():
                 message = await self.ws.recv()
                 print("msg: ", message)
                 # print("")
-                if ("Éva" in message and "1" in message):
-                    counter += 1
-                    continue
-                if ("1" in message and counter > 0):
-                    str = message
+                # if "Éva" in message and "1" in message:
+                #     counter += 1
+                #     continue
+                if "1" in message and "Éva" in message and len(message.split(' ')) >= 3:
+                    # str = message
                     self.is_sending=False
-                    str=str[9:]
-                    return str
+                    # str=str[9:]
+                    return message[13:]
+                if "error|recog-error" in message:
+                    return message
+
 
     async def ws_check_connection(self):
         async for ws in websockets.connect(self.uri):
@@ -99,7 +102,8 @@ class SpeechToTextAPI():
                         print("frames sent: ", self.frames_sent)
                         # await self.ws.send("control|ping")
                         # await self.ws.send(audio_frame)
-
+                    if self.frames_sent % 300 == 0:
+                        await self.ws.send("control|ping")
                     await asyncio.sleep(0)
 
                     # if self.frames_sent == 330000:

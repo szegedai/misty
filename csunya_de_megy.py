@@ -12,28 +12,28 @@
 # followFace: https://github.com/CPsridharCP/MistySkills/blob/master/ExampleSkills/Advanced/followFace/followFace.js
 # misty documentation: https://docs.mistyrobotics.com/
 
-import tts
-import sys
+from tts import TextToSpeechAPI
 import time
 import random
 import base64
 import asyncio
 import numpy as np
 import dateutil.parser
-import rps
-import recognizer
-import sys, traceback
+import sys
+import traceback
 import Recorder
 import SpeechToText
 import globals
 from main import init
 from main import datastream
-
+from rps_cvzone import *
+from hci_methods import *
 from statistics import mean
 from mistyPy.Robot import Robot
 from mistyPy.Events import Events
 from datetime import datetime, timezone
 from mistyPy.EventFilters import EventFilters
+import hci_methods
 
 # LOOP = None
 searching_for_face = None
@@ -66,6 +66,8 @@ vector = None
 # RECORDER = None
 degree_list = []
 stt = SpeechToText.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
+
+tts = TextToSpeechAPI("http://szeged:s23936@cyrus.tmit.bme.hu/hmmtts2/synth_hmm_wav.php")
 
 
 # initializing variables, registering events and starting services required for the idle skill
@@ -152,35 +154,42 @@ def bump_callback(data):
 # we call this function when we want to start an external skill from the main loop
 # we pass the name of the skill we want to start as a parameter
 def start_external_skill(skill=""):
-
-    global start_external, skill_to_start
     stop_idle_skill()
     time.sleep(1)
     print(f"starting {skill} skill")
-    skill_to_start = skill
-    start_external = True
+
+    if skill == "ph_rps":
+        rps_start_skill(misty)
+    elif skill == "ph_recognizer":
+        recognizer_start_skill(misty, recorder=globals.RECORDER)
+
+    print("restarting idle_skill")
+    start_idle_skill(misty, False)
 
 
-def recording(recorder):
+def recording():
     # global idle_skill
     # idle_skill=False
-
-    data_stream = datastream(recorder, stt)
+    misty.StopFaceRecognition()
+    data_stream = datastream(globals.RECORDER, stt)
     try:
-        misty.ChangeLED(200, 0,0)
+        misty.ChangeLED(200, 0, 0)
         print("try")
         # loop_a = asyncio.new_event_loop()
         # asyncio.set_event_loop(loop_a)
-        print("-"*60)
+        print("-" * 60)
         print("globals.LOOP: ", globals.LOOP)
         print("globals.RECORDER: ", globals.RECORDER)
         print("-" * 60)
         res = globals.LOOP.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
         print("KESZ")
         print(res[1])
-        misty.ChangeLED(0,200,0)
-
-        respond(str.lower(res[1]))
+        misty.ChangeLED(0, 200, 0)
+        if "error|recog-error" in res:
+            recording()
+        else:
+            misty.ChangeLED(0, 200, 0)
+            respond(str.lower(res[1]))
 
     except Exception as e:
         print("Recording error from idle_skill: ", e)
@@ -191,22 +200,14 @@ def recording(recorder):
 
 # this function starts the idle skill
 def start_idle_skill(misty_robot, calibration=False):
-    global searching_for_face, misty, turn_in_progress,  face_rec_event_status
+    global searching_for_face, misty, turn_in_progress, face_rec_event_status
     global date_time_of_last_face_detection, idle_skill, waiting_for_response, seconds_since_last_detection
 
-    globals.init()
-
     misty = misty_robot
-
-    globals.LOOP = asyncio.new_event_loop()
-    asyncio.set_event_loop(globals.LOOP)
-    globals.LOOP.run_until_complete(init(stt))
-
-    stream_params = Recorder.StreamParams()
-    globals.RECORDER = Recorder.Recorder(stream_params)
-    globals.RECORDER.create_recording_resources()
-
+    misty.MoveHead(0, 0, 0, 2)
     init_variables_and_events()
+
+
     print("idle_skill STARTED")
     if calibration:
         calibrate()
@@ -217,7 +218,7 @@ def start_idle_skill(misty_robot, calibration=False):
         if misty is not None:
             # if status is not in face_rec_event_status.data it means misty sees a face,
             # so we save the time of the detection
-            if not "status" in face_rec_event_status.data:
+            if "status" not in face_rec_event_status.data:
                 date_time_of_last_face_detection = dateutil.parser.isoparse(
                     face_rec_event_status.data["message"]["created"])
             # if we already detected a face, we calculate the seconds since the last detection
@@ -228,11 +229,12 @@ def start_idle_skill(misty_robot, calibration=False):
             # then we unregister events for conversation and register events for turning
             if not searching_for_face:
                 # misty.StopFaceRecognition()
-                recording(globals.RECORDER)
+                waiting_for_response = True
+                recording()
 
             if (seconds_since_last_detection >= 4 or searching_for_face) \
                     and not turn_in_progress \
-                    and not waiting_for_response\
+                    and not waiting_for_response \
                     and not start_external:
 
                 # if the key_phrase_recognized event is still registered,
@@ -249,14 +251,14 @@ def start_idle_skill(misty_robot, calibration=False):
 
                 # if key_phrase_turn is not registered, we register it
                 # this event is needed for turning towards sound
-                if not "key_phrase_turn" in misty.active_event_registrations:
+                if "key_phrase_turn" not in misty.active_event_registrations:
                     print("KeyPhraseRecognition started (for turning)")
                     misty.StartKeyPhraseRecognition(captureSpeech=False)
                     misty.RegisterEvent("key_phrase_turn", Events.KeyPhraseRecognized,
                                         callback_function=key_phrase_turn_callback, debounce=10, keep_alive=False)
                 # if sound is not registered, we register it
                 # this event is also needed for turning towards sound
-                if not "sound" in misty.active_event_registrations:
+                if "sound" not in misty.active_event_registrations:
                     misty.RegisterEvent("sound", Events.SourceTrackDataMessage, callback_function=sound_callback,
                                         debounce=100, keep_alive=True)
                 searching_for_face = True
@@ -431,12 +433,14 @@ def look_at(heading, robot_yaw_at_start, head_yaw_at_start):
         # so we break and stop misty's turn
         if (datetime.now(timezone.utc) - look_at_start_time).total_seconds() > 10:
             print("something went wrong during turning")
-            break
+            misty.MoveHead(0, 0, 0, 2)
+
     # when we reach the target, we stop misty's turn
     misty.Stop()
     # after the turning is done, we register the face_rec event again
     face_rec_event_status = misty.RegisterEvent("face_rec", Events.FaceRecognition, callback_function=face_rec_callback,
                                                 debounce=1300, keep_alive=True)
+    print(face_rec_event_status)
     print("look_at DONE")
 
 
@@ -473,19 +477,18 @@ def respond(speech_to_text_result=""):
     # if intent == "play rock paper scissors":
     #   start_external_skill("rps")
     misty.DisplayImage("e_Love.jpg")
-    if "minta" in speech_to_text_result or "mint a" in speech_to_text_result:
-        start_external_skill("sample")
-    elif "papír" in speech_to_text_result:
+    if "papír" in speech_to_text_result:
         start_external_skill("ph_rps")
-    elif "felismerő" in speech_to_text_result or "ismer" in speech_to_text_result:
+    if "felismerő" or "ismer" in speech_to_text_result:
         start_external_skill("ph_recognizer")
     else:
         print("Nem értette")
-        tts.synthesize_text_to_robot(misty, f"Azt hallottam, hogy: {speech_to_text_result}", "response.wav")
-        # tts.synthesize_text_to_robot(misty, "Nem értettem, kérlek mondd máshogy!", "response.wav")
-        recording(globals.RECORDER)
+        length_of_audio = tts.synthesize_text_to_wav(f"Azt hallottam, hogy: {speech_to_text_result}", misty, "response.wav")
+        time.sleep(length_of_audio)
+        # length_of_audio = tts.synthesize_text_to_robot(misty, "Nem értettem, kérlek mondd máshogy!", "response.wav")
 
     waiting_for_response = False
+    misty.StartFaceRecognition()
 
 
 # callback for the face_rec event
@@ -496,18 +499,18 @@ def respond(speech_to_text_result=""):
 def face_rec_callback(data):
     global searching_for_face, misty, turn_in_progress, first_contact
 
-
     print("face found!")
     # print(data["message"]["label"])
 
     if first_contact:
-        tts.synthesize_text_to_robot(misty,
-                                     # "Hello Én miszti robot vagyok! Örülök, hogy itt vagy! 3 szuper játékot tudsz "
-                                     # "velem játszani. Kő papír olló, felismerő robot és érzelem robot. Melyikkel "
-                                     # "szeretnél játszani? A héj miszti paranccsal tudsz megszólítani, "
-                                     "majd a pittyenés után beszélhetsz.",
-                                     "response.wav")
+        length_of_audio = tts.synthesize_text_to_wav(
+                                                     # "Hello, én Éva vagyok! Kettő játékot tudsz velem játszani, "
+                                                     # "kő papír ollót vagy mutatsz 2 tárgyat megkérdezed mit mutatsz,"
+                                                     # " és én eldöntöm, hogy mi van a kezedben."
+                                                     "Pittyenés után kérlek mondd mivel szeretnél játszani", misty)
+        time.sleep(length_of_audio)
         first_contact = False
+        misty.PlayAudio("s_SystemWakeWord.wav")
 
     # unregistering events used for turning
     if "key_phrase_turn" in misty.active_event_registrations:
@@ -583,9 +586,260 @@ def stop_idle_skill():
     print("IDLE_SKILL_STOPPED")
 
 
+# sample skill for misty, doesn't do anything special, can be used as a starting point for future skills
+# start_sample_skill gets the robot as a parameter, so we can use its functions (we call this function from the
+# idle skill)
+# an infinite loop is required to not exit the function (or misty.KeepAlive() if we only use events)
+# the function needs to return with True with the current skill switching implementation
+
+# from idle_skill import start_idle_skill
+# RECORDER = None
+
+# LOOP = None
+# RECORDER = None
+
+
+def rps_start_skill(misty_robot):
+    global return_to_idle, misty
+    return_to_idle = False
+
+    time.sleep(1)
+    print("started")
+    misty = misty_robot
+    length_of_audio = tts.synthesize_text_to_wav("Elindult a kő papír olló játék, ha készen állsz, mondd,"
+                                                 " hogy Éva szeretnék játszani ellened egyet", misty, "response.wav")
+    time.sleep(length_of_audio)
+    print("rps skill started")
+    misty.UnregisterAllEvents()
+    misty.MoveArms(leftArmPosition=90, rightArmPosition=0, duration=0.1)
+    # misty.MoveHead(pitch=0, roll=0, yaw=0)
+    try:
+        if misty is not None:
+            misty.ChangeLED(255, 255, 0)
+
+        rps_recording()
+        while True:
+            time.sleep(1)
+            if return_to_idle:
+                return_to_idle = False
+                time.sleep(2)
+                return True
+    except KeyboardInterrupt:
+        time.sleep(2)
+        return True
+
+    except Exception as e:
+        print("Exception in user code: ")
+        print("-" * 60)
+        traceback.print_exc(file=sys.stdout)
+        print("-" * 60)
+
+    finally:
+        return True
+
+
+def rps_recording():
+    data_stream = datastream(globals.RECORDER, stt)
+    try:
+        misty.ChangeLED(200, 0, 0)
+        res = globals.LOOP.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
+        print(res[1])
+        if "error|recog-error" in res:
+            rps_recording()
+        else:
+            misty.ChangeLED(0, 200, 0)
+            rps_respond(str.lower(res[1]))
+
+    except Exception:
+        print("Exception in user code:")
+        print("-" * 60)
+        traceback.print_exc(file=sys.stdout)
+        print("-" * 60)
+        # globals.RECORDER.close_recording_resources()
+    # finally:
+    # globals.RECORDER.close_recording_resources()
+
+
+def rps_respond(speech_to_text_result=""):
+    global return_to_idle, RECORDER
+    return_to_idle = False
+    matches = ["egyet", "játszunk", "még", "játszani", "szeretnék"]
+    rps_exiting = ["kilép", "befejez", "vége", "abba", "lép"]
+    # TODO: recognise the user's intent and answer or start a skill based on that
+
+    misty.DisplayImage("e_Thinking2.jpg")
+    if any(x in speech_to_text_result for x in rps_exiting):
+        return_to_idle = True
+
+    elif any(x in speech_to_text_result for x in matches):
+        print("még egyet")
+        rps()
+
+    else:
+        print("Nem értette")
+        print(speech_to_text_result)
+        misty.DisplayImage("e_Disoriented.jpg")
+        length_of_audio = tts.synthesize_text_to_wav("Nem értettelek, kérlek ismételd meg!", misty, "response.wav")
+        time.sleep(length_of_audio)
+        rps_recording()
+
+
+# Takes a picture and with cvzone's hand detector you get all the necessary finger position called landmarks
+# and with those positions we can calculate which of the three moves the player is showing.
+def get_human_move():
+    data = misty.TakePicture(base64=True, fileName="test_photo", width=1440, height=1080)
+    with open("file.jpg", "wb") as pic:
+        pic.write(base64.b64decode(data.json()['result']['base64']))
+
+    return image_landmarks(file_name="file.jpg")
+
+
+def rps():
+    length_of_audio = tts.synthesize_text_to_wav("Kő, papír, olló.", misty, "response.wav")
+
+    # Wave arms three times
+    for _ in range(3):
+        misty.MoveArm("right", 30, duration=length_of_audio/6)
+        misty.MoveArm("right", -29, duration=length_of_audio/6)
+
+    # Detect the player's move and pick a random move for Misty
+    human_move = get_human_move()
+    misty_move = get_random_move()
+
+    while human_move is None:
+        length_of_audio = tts.synthesize_text_to_wav("kérlek mutasd újra, mert nem láttam megfelelően a kezed", misty,
+                                                     "response.wav")
+        time.sleep(length_of_audio)
+        human_move = get_human_move()
+    # Show Misty's move
+    # Images are preloaded on the robot
+    misty.DisplayImage(f"{misty_move}_disp.png")
+
+    print(f"Human's move is {human_move}")
+    print(f"Misty's move is {misty_move}")
+
+    # Determine the winner and assemble the text that announces the winner
+    misty_move_hun = f"Én {get_move_hun(misty_move)} választottam."
+    human_move_hun = f"Te {get_move_hun(human_move)} választottál."
+    winner_hun = ""
+
+    winner = get_winner(human_move, misty_move)
+    expression = ""
+    if winner == 2:
+        print("Misty wins!")
+        winner_hun = "Én nyertem."
+        expression = "e_EcstacyStarryEyed.jpg"
+    elif winner == 0:
+        print("Draw!")
+        winner_hun = "Döntetlen."
+        expression = "e_Surprise.jpg"
+    elif winner == 1:
+        print("You won")
+        winner_hun = "Te nyertél."
+        expression = "e_Rage3.jpg"
+
+    # Announce Misty's move and winner
+    misty_move_and_winner_announcement_hun = f"{misty_move_hun} {human_move_hun} {winner_hun}"
+    print(misty_move_and_winner_announcement_hun)
+
+    length_of_audio = tts.synthesize_text_to_wav(misty_move_and_winner_announcement_hun, misty, "response.wav")
+    misty.DisplayImage(expression)
+    time.sleep(length_of_audio)
+
+    # Reset Misty's face
+    misty.DisplayImage("e_DefaultContent.jpg")
+
+    # Prompt the user to play again or stop playing
+
+    length_of_audio = tts.synthesize_text_to_wav(
+        "Kérlek jelezd, ha szeretnél még egyet játszani.", misty, "response.wav")
+    time.sleep(length_of_audio)
+
+    rps_recording()
+
+
+# sample skill for misty, doesn't do anything special, can be used as a starting point for future skills
+# start_sample_skill gets the robot as a parameter,
+# so we can use its functions (we call this function from the idle skill)
+# an infinite loop is required to not exit the function (or misty.KeepAlive() if we only use events)
+# the function needs to return with True with the current skill switching implementation
+
+
+thanks = 'Köszönöm a játékot'
+input_text = 'Kérlek mutass egy tárgyat és kérdezd meg, hogy mit mutatsz, például Éva ez egy alma vagy körte?'
+
+
+def recognizer_respond(speech_to_text_result, recorder):
+    global return_to_idle
+    print(speech_to_text_result)
+    recog_exiting = ["kilép", "befejez", "vége", "abba", "lépj"]
+    if any(x in speech_to_text_result for x in recog_exiting):
+        length_of_audio = tts.synthesize_text_to_wav(thanks, misty, "response.wav")
+        time.sleep(length_of_audio)
+        return_to_idle = True
+    elif "vagy" in speech_to_text_result:
+        print("még egy játék!")
+        hci_methods.recognizer(misty, speech_to_text_result)
+        recognizer_recording(recorder)
+    else:
+        print("nem értettem, próbáld újra")
+        recognizer_recording(recorder)
+
+
+def recognizer_recording(recorder):
+    data_stream = datastream(recorder, stt)
+    try:
+        misty.ChangeLED(200, 0, 0)
+
+        res = globals.LOOP.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
+        if "error|recog-error" in res:
+            recognizer_recording(recorder)
+        else:
+            misty.ChangeLED(0, 200, 0)
+            recognizer_respond(str.lower(res[1]), recorder)
+
+    except KeyboardInterrupt as e:
+        print(e)
+        # recorder.close_recording_resources()
+
+
+def recognizer_start_skill(misty_robot, recorder):
+    global misty, return_to_idle
+    return_to_idle = False
+    misty = misty_robot
+    try:
+        length_of_audio = tts.synthesize_text_to_wav(input_text, misty, "response.wav")
+        time.sleep(length_of_audio)
+        print("recognizer skill started")
+        if misty is not None:
+            misty.ChangeLED(255, 0, 255)
+
+            recognizer_recording(recorder)
+            # misty.UnregisterAllEvents()
+        while True:
+            time.sleep(1)
+            if return_to_idle:
+                return_to_idle = False
+                time.sleep(2)
+                return True
+    except KeyboardInterrupt:
+        return_to_idle = True
+
+    except Exception as e:
+        print(e)
+    finally:
+        return True
+
+
 if __name__ == "__main__":
+    globals.init()
+    globals.LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(globals.LOOP)
+    globals.LOOP.run_until_complete(init(stt))
 
-
+    stream_params = Recorder.StreamParams()
+    globals.RECORDER = Recorder.Recorder(stream_params)
+    globals.RECORDER.create_recording_resources()
 
     try:
         if len(sys.argv) > 1:
@@ -595,27 +849,8 @@ if __name__ == "__main__":
         misty = Robot(misty_ip_address)
 
         misty.UnregisterAllEvents()
-        # print(EventFilters.mro())
-        # print(Robot.Get)
-        while True:
-            time.sleep(0.1)
-            print("main cycle")
-            if skill_finished or restart_skill:
-                print("starting idle skill")
-                first_contact = False
-                start_idle_skill(misty)
+        start_idle_skill(misty, False)
 
-            # if start_external is True, we check the skill_to_start variable's value and start a skill based on that
-            if start_external:
-
-                if skill_to_start == "ph_rps":
-                    skill_finished = rps.start_skill(misty)
-                elif skill_to_start == "ph_recognizer":
-                    skill_finished = recognizer.start_skill(misty, recorder=globals.RECORDER)
-
-                else:
-                    print("skill not found restarting idle_skill")
-                    restart_skill = True
         # this loop keeps the program alive
         # if skill_finished is True, we start the idle skill (which sets the skill_finished variable to false)
         # we keep cheking if skill_finished is True, so we can start the idle skill again

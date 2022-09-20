@@ -14,7 +14,7 @@ async def init(stt_obj):
 
 
 async def datastream(recorder_obj, stt_obj):
-
+    print("Datastream started")
     while True:
         audio_data = recorder_obj.read_audio_data_from_stream()
         asd = await stt_obj.ws_stream_send(audio_data)
@@ -35,8 +35,6 @@ if __name__ == "__main__":
         res = loop.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
         print("KESZ")
         print(res[1])
-
-
 
     except KeyboardInterrupt as e:
         print(e)

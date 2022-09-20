@@ -4,7 +4,8 @@
 # an infinite loop is required to not exit the function (or misty.KeepAlive() if we only use events)
 # the function needs to return with True with the current skill switching implementation
 import asyncio
-
+import time
+import globals
 import Recorder
 import SpeechToText
 import sys, traceback
@@ -19,12 +20,27 @@ from mistyPy.Events import Events
 # RECORDER = None
 return_to_idle = False
 misty = None
+# LOOP = None
+# RECORDER = None
 stt = SpeechToText.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
 
 
-def start_skill(misty_robot, recorder, loop):
-    global return_to_idle, misty
+# def connecting_to_stt():
+#     global LOOP, RECORDER
+#     LOOP = asyncio.new_event_loop()
+#     asyncio.set_event_loop(LOOP)
+#     LOOP.run_until_complete(init(stt))
+#
+#     stream_params = Recorder.StreamParams()
+#     RECORDER = Recorder.Recorder(stream_params)
+#     RECORDER.create_recording_resources()
 
+
+def start_skill(misty_robot):
+    global return_to_idle, misty
+    # global RECORDER
+    time.sleep(3)
+    # connecting_to_stt()
     print("started")
     misty = misty_robot
     tts.synthesize_text_to_robot(misty, "Elindult a kő papír olló játék", "response.wav")
@@ -39,7 +55,7 @@ def start_skill(misty_robot, recorder, loop):
                                 debounce=2000,
                                 keep_alive=True)
 
-        recording(recorder, loop)
+        recording()
         while True:
             time.sleep(1)
             if return_to_idle:
@@ -48,56 +64,63 @@ def start_skill(misty_robot, recorder, loop):
                 time.sleep(2)
                 return True
     except KeyboardInterrupt:
+        globals.RECORDER.close_recording_resources()
         exit_function(misty)
         time.sleep(2)
         return True
 
     except Exception as e:
-        print(e)
+        print("Exception in user code: ")
+        print("-" * 60)
+        traceback.print_exc(file=sys.stdout)
+        print("-" * 60)
 
     finally:
+        globals.RECORDER.close_recording_resources()
         return True
 
 
-def recording(recorder, loop):
+def recording():
+    # global RECORDER, LOOP
 
-    data_stream = datastream(recorder, stt)
+    data_stream = datastream(globals.RECORDER, stt)
     try:
         misty.ChangeLED(200, 0,0)
-        print("recording_")
+        print("-" * 60)
+        print("Globals RECORDER: ", globals.RECORDER)
         # loop = asyncio.get_event_loop()
-        print(loop)
-        res = loop.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
-        print("KESZ")
+        print("Globals LOOP: ", globals.LOOP)
+        print("-" * 60)
+        res = globals.LOOP.run_until_complete(asyncio.gather(data_stream, stt.message_listener()))
         print(res[1])
         misty.ChangeLED(0,200,0)
-        respond(recorder, loop, str.lower(res[1]))
+        respond(globals.RECORDER, globals.LOOP, str.lower(res[1]))
 
     except Exception:
         print("Exception in user code:")
         print("-" * 60)
         traceback.print_exc(file=sys.stdout)
         print("-" * 60)
-        recorder.close_recording_resources()
+        globals.RECORDER.close_recording_resources()
     finally:
-        recorder.close_recording_resources()
+        globals.RECORDER.close_recording_resources()
 
 
 def respond(recorder, loop, speech_to_text_result=""):
-    global return_to_idle
+    global return_to_idle,RECORDER
     print(speech_to_text_result)
     # TODO: recognise the user's intent and answer or start a skill based on that
     # e.g.
     # if intent == "play rock paper scissors":
     #   start_external_skill("rps")
     misty.DisplayImage("e_Thinking2.jpg")
-    if ("lépj" or "lép") in speech_to_text_result:
+    if "lépj" or "lép" in speech_to_text_result:
         exit_function(misty)
         return_to_idle = True
         # start_idle_skill()
 
     elif "még egyet" or "játszunk" or "még" or "játszani" or "szeretnék" in speech_to_text_result:
-        rps(recorder, loop)
+        rps(globals.RECORDER, loop)
     # elif "papír" in speech_to_text_result:
     #     start_external_skill("ph_rps")
     # elif "felismerő" in speech_to_text_result or "ismer" in speech_to_text_result:
@@ -108,7 +131,7 @@ def respond(recorder, loop, speech_to_text_result=""):
         print(speech_to_text_result)
         misty.DisplayImage("e_Disoriented.jpg")
         tts.synthesize_text_to_robot(misty, "Nem értettem, kérlek mondd máshogy!", "response.wav")
-        recording(recorder, loop)
+        recording()
 
 
 # Takes a picture and with cvzone's hand detector you get all the necessary finger position called landmarks
@@ -186,7 +209,7 @@ def rps(recorder, loop):
     time.sleep(5)
 
     print("done")
-    recording(recorder, loop)
+    recording()
 
 
 def captouch_callback(data):
@@ -212,15 +235,17 @@ def captouch_callback(data):
         # start_idle_skill(misty)
 
 
-# if __name__ == '__main__':
-#     ip = '10.2.8.5'
-#     misty = Robot(ip)
-    # loop = asyncio.new_event_loop()
-    # asyncio.set_event_loop(loop)
-    # loop.run_until_complete(init(stt))
+if __name__ == '__main__':
+    ip = '10.2.8.5'
+    misty = Robot(ip)
 
-    # stream_params = Recorder.StreamParams()
-    # recorder = Recorder.Recorder(stream_params)
-    # recorder.create_recording_resources()
-    # misty.UnregisterAllEvents()
-    # start_skill(misty, misty_ip_address=ip)
+    globals.init()
+    globals.LOOP= asyncio.new_event_loop()
+    asyncio.set_event_loop(globals.LOOP)
+    globals.LOOP.run_until_complete(init(stt))
+
+    stream_params = Recorder.StreamParams()
+    globals.RECORDER = Recorder.Recorder(stream_params)
+    globals.RECORDER.create_recording_resources()
+    misty.UnregisterAllEvents()
+    start_skill(misty)
