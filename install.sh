@@ -1,4 +1,5 @@
 pip install -r requirements.txt
+conda --yes install git
 pip install git+https://github.com/ficstamas/huclip-the-text.git
 pip uninstall --yes spacy-legacy
 pip uninstall --yes spacy-loggers

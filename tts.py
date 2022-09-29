@@ -82,7 +82,9 @@ if __name__ == "__main__":
     #         tts_api.synthesize_text_to_wav(text)
     #     else:
     #         print("Error! Unable to connect to the TTS server!")
-    misty = Robot('10.2.8.5')
-    tts = TextToSpeechAPI("http://szeged:s23936@cyrus.tmit.bme.hu/hmmtts2/synth_hmm_wav.php", "MK")
+    misty = Robot('192.168.0.53')
+    # tts = TextToSpeechAPI("http://szeged:s23936@cyrus.tmit.bme.hu/hmmtts2/synth_hmm_wav.php", "MK")
+    tts = TextToSpeechAPI("https://chatbot-rgai3.inf.u-szeged.hu/flask/tts", "MK")
+
     t = tts.synthesize_text_to_wav("Hello, Éva vagyok", misty, 'response.wav')
     print(t)

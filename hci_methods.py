@@ -1,5 +1,5 @@
 import cv2
-import tts
+from tts import TextToSpeechAPI
 import time
 import base64
 import asyncio
@@ -7,10 +7,9 @@ import SpeechToText
 # from RPS.detection import _grab_mid
 from huclip_the_text.model.clip import KeywordCLIP
 from PIL import Image
+
 stt = SpeechToText.SpeechToTextAPI("wss://chatbot-rgai3.inf.u-szeged.hu/socket")
 model = KeywordCLIP()
-
-again = 'Ha szeretnél új kérdést feltenni akkor simogasd meg újra a fejem. Ha nem szeretnél tovább játszani érj az államhoz.'
 
 #
 # def show_rps_frame(image):
@@ -19,27 +18,29 @@ again = 'Ha szeretnél új kérdést feltenni akkor simogasd meg újra a fejem. 
 #     cv2.waitKey(1)
 
 
-def recognizer(misty, message):
-    time.sleep(2)
-    misty.SetBlinking(True)
-    data = misty.TakePicture(base64=True, fileName="test_photo", width=1440, height=1080)
-    misty.SetBlinking(False)
-    # print()
-    with open("file.jpg", "wb") as pic:
-        pic.write(base64.b64decode(data.json()['result']['base64']))
-    image = cv2.imread('file.jpg')
-
-    misty.ChangeLED(255, 255, 0)
-    best_answer, probability, all_answer = model.evaluate(Image.fromarray(image), message)
-    # TODO speech_to_text(url, '')
-
-    misty.ChangeLED(0, 255, 0)
-    misty.DisplayImage('e_Joy.jpg')
-
-    tts.synthesize_text_to_robot(misty, best_answer + ' van előttem', 'output.wav')
-    time.sleep(5)
-    misty.DisplayImage('e_DefaultContent.jpg')
-    tts.synthesize_text_to_robot(misty, again, 'again.wav')
+# def recognizer(misty, message):
+#     time.sleep(2)
+#     misty.SetBlinking(True)
+#     data = misty.TakePicture(base64=True, fileName="test_photo", width=1440, height=1080)
+#     misty.SetBlinking(False)
+#     # print()
+#     with open("file.jpg", "wb") as pic:
+#         pic.write(base64.b64decode(data.json()['result']['base64']))
+#     image = cv2.imread('file.jpg')
+#
+#     misty.ChangeLED(255, 255, 0)
+#     best_answer, probability, all_answer = model.evaluate(Image.fromarray(image), message)
+#     # TODO speech_to_text(url, '')
+#
+#     misty.ChangeLED(0, 255, 0)
+#     misty.DisplayImage('e_Joy.jpg')
+#     print("hello")
+#     length_of_audio = tts.synthesize_text_to_wav(best_answer + ' van előttem', misty, 'response.wav')
+#     print(length_of_audio)
+#     time.sleep(length_of_audio)
+#     misty.DisplayImage('e_DefaultContent.jpg')
+#     length_of_audio = tts.synthesize_text_to_wav(again, misty, 'response.wav')
+#     time.sleep(length_of_audio)
 
 
 def default_image_classification_algorithm(image):
@@ -84,4 +85,3 @@ def remove_closed_events(misty):
     for event_name in events_to_remove:
         print(f"Event connection has closed for event: {event_name}")
         misty.UnregisterEvent(event_name)
-
