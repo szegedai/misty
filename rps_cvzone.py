@@ -40,7 +40,7 @@ def rock_paper_scissors(landmarks, detector):
     # If the index and the middle fingers are closed it's going to be rock,
     # if the ring and pinky fingers are smaller
     # than the benching distance than it's scissors else its paper
-    if (euk_index and euk_middle) < euk_bench:
+    if (euk_index and euk_middle and euk_ring and euk_pinky) < euk_bench:
         return "rock"
     if (euk_ring and euk_pinky) < euk_bench < (euk_middle and euk_index):
         return "scissors"

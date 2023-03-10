@@ -3,7 +3,6 @@ Get the audio_data with recorder then send to the speechtotext as a stream.
 """
 
 import asyncio
-
 import SpeechToText
 import Recorder
 
@@ -19,7 +18,7 @@ async def datastream(recorder_obj, stt_obj):
         audio_data = recorder_obj.read_audio_data_from_stream()
         asd = await stt_obj.ws_stream_send(audio_data)
         if asd:
-            return "cica"
+            return ""
 
 if __name__ == "__main__":
     stream_params = Recorder.StreamParams()

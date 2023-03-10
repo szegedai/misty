@@ -3,7 +3,6 @@ import websockets
 import signal
 import wave
 import sys
-import signal
 import time
 
 
@@ -48,7 +47,7 @@ class SpeechToTextAPI():
                 # if "Éva" in message and "1" in message:
                 #     counter += 1
                 #     continue
-                if "1" in message and "Éva" in message and len(message.split(' ')) >= 3:
+                if "|1;" in message and "Éva" in message and len(message.split(' ')) >= 3:
                     # str = message
                     self.is_sending = False
                     # str=str[9:]

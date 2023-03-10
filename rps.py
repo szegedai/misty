@@ -9,8 +9,8 @@ import globals
 import Recorder
 import SpeechToText
 import sys, traceback
-from main import init
-from main import datastream
+from data_stream import init
+from data_stream import datastream
 from rps_cvzone import *
 from hci_methods import *
 from mistyPy.Robot import Robot
@@ -109,7 +109,6 @@ def recording():
 def respond(recorder, loop, speech_to_text_result=""):
     global return_to_idle,RECORDER
     print(speech_to_text_result)
-    # TODO: recognise the user's intent and answer or start a skill based on that
     # e.g.
     # if intent == "play rock paper scissors":
     #   start_external_skill("rps")

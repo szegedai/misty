@@ -3,15 +3,15 @@
 # so we can use its functions (we call this function from the idle skill)
 # an infinite loop is required to not exit the function (or misty.KeepAlive() if we only use events)
 # the function needs to return with True with the current skill switching implementation
-import tts
+import TextToSpeech
 import time
 import base64
 import asyncio
 
 import Recorder
 import SpeechToText
-from main import init
-from main import datastream
+from data_stream import init
+from data_stream import datastream
 import hci_methods
 from mistyPy.Robot import Robot
 from mistyPy.Events import Events
